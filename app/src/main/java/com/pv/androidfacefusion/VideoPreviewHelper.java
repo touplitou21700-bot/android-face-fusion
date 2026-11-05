@@ -7,6 +7,7 @@ import android.util.Log;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -16,121 +17,213 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Android Face Fusion V2 - aperçu local d'une video.
+ * Android Face Fusion V2 - etape 9.
  *
- * Lit les metadonnees avec VideoFrameReader et affiche une seule image,
- * extraite vers le milieu de la video. Ne realise aucun face swap.
+ * Teste le face swap sur UNE image extraite au milieu d'une video MP4.
+ * Ne modifie pas la video et ne produit pas encore de MP4.
+ *
+ * Les fichiers restent sur l'appareil ; les modeles doivent deja etre charges.
  */
 public final class VideoPreviewHelper {
 
     private static final String TAG = "VideoPreviewHelper";
-    private static final int MAX_PREVIEW_SIDE = 640;
+    private static final int MAX_FRAME_SIDE = 640;
 
     private VideoPreviewHelper() {
-        // Classe utilitaire : pas d'instance.
+        // Classe utilitaire.
     }
 
     /**
-     * Appeler depuis le thread principal apres selection d'une video.
-     * Le travail de decodage se fait dans l'executor fourni.
+     * Methode appelee sur le thread principal depuis MainActivity.
+     * Le Bitmap source est copie avant de lancer le traitement en arriere-plan.
      */
     public static void analyze(
             AppCompatActivity activity,
             Uri videoUri,
-            ExecutorService executor
+            ExecutorService executor,
+            Bitmap sourceBitmap,
+            FaceDetector detector,
+            FaceEmbedder embedder,
+            FaceFusionProcessor processor
     ) {
-        if (videoUri == null || activity.isFinishing() || activity.isDestroyed()) {
+        if (activity.isFinishing() || activity.isDestroyed() || videoUri == null) {
             return;
         }
 
-        Toast.makeText(
-                activity,
-                "Lecture de l'aperçu vidéo...",
-                Toast.LENGTH_SHORT
-        ).show();
+        if (sourceBitmap == null || sourceBitmap.isRecycled()) {
+            showMessage(activity, "Photo source manquante",
+                    "Choisis d'abord une photo dans Source (mode Standard), "
+                            + "puis sélectionne la vidéo MP4.");
+            return;
+        }
+
+        if (detector == null || embedder == null || processor == null) {
+            showMessage(activity, "Modèles non prêts",
+                    "Attends le chargement complet des modèles IA, puis réessaie.");
+            return;
+        }
+
+        // L'utilisateur peut changer ou réinitialiser la photo pendant le calcul.
+        // Une copie distincte empêche un accès à un Bitmap recyclé.
+        final Bitmap sourceCopy;
+        try {
+            sourceCopy = sourceBitmap.copy(Bitmap.Config.ARGB_8888, false);
+            if (sourceCopy == null) {
+                throw new IllegalStateException("Copie de la source impossible");
+            }
+        } catch (RuntimeException error) {
+            showMessage(activity, "Photo source indisponible", error.getMessage());
+            return;
+        }
+
+        Toast.makeText(activity, "Traitement de l'aperçu vidéo...",
+                Toast.LENGTH_LONG).show();
 
         executor.execute(() -> {
-            Bitmap preview = null;
+            Bitmap frame = null;
+            Bitmap swappedFrame = null;
+            VideoFaceSwapEngine engine = null;
+
             try (VideoFrameReader reader = new VideoFrameReader(activity, videoUri)) {
                 long durationMs = reader.getDurationMs();
-                int width = reader.getWidth();
-                int height = reader.getHeight();
-                int rotation = reader.getRotationDegrees();
+                int videoWidth = reader.getWidth();
+                int videoHeight = reader.getHeight();
 
-                preview = reader.getFrameAtMs(durationMs / 2, MAX_PREVIEW_SIDE);
-                if (preview == null) {
-                    throw new IllegalStateException("Aucune image extraite");
+                // Un seul Bitmap est extrait pour ce test.
+                frame = reader.getFrameAtMs(durationMs / 2L, MAX_FRAME_SIDE);
+                if (frame == null) {
+                    throw new IllegalStateException("Impossible d'extraire une image vidéo");
                 }
 
-                final Bitmap displayedFrame = preview;
-                final String description = String.format(
-                        Locale.FRANCE,
-                        "Durée : %.1f s\nRésolution : %d × %d\nRotation : %d°\n\n"
-                                + "Aperçu extrait au milieu de la vidéo."
-                                + "\nLe face swap vidéo sera ajouté ensuite.",
-                        durationMs / 1000.0,
-                        width,
-                        height,
-                        rotation
-                );
+                engine = new VideoFaceSwapEngine(detector, embedder, processor);
+                engine.prepareSource(sourceCopy);
+                swappedFrame = engine.swapFrame(frame);
+                if (swappedFrame == null) {
+                    throw new IllegalStateException("Le moteur IA n'a pas produit d'image");
+                }
 
-                activity.runOnUiThread(() -> {
-                    if (activity.isFinishing() || activity.isDestroyed()) {
-                        if (!displayedFrame.isRecycled()) {
-                            displayedFrame.recycle();
-                        }
-                        return;
-                    }
+                final Bitmap originalForDialog = frame;
+                final Bitmap resultForDialog = swappedFrame;
+                final String metadata = String.format(Locale.FRANCE,
+                        "Durée : %.1f s  •  Résolution : %d × %d\n"
+                                + "Image traitée : milieu de la vidéo\n"
+                                + "Test sur une seule image ; aucun MP4 n'est créé.",
+                        durationMs / 1000.0, videoWidth, videoHeight);
 
-                    int padding = (int) (16 * activity.getResources()
-                            .getDisplayMetrics().density + 0.5f);
+                // Les deux Bitmap sont désormais pris en charge par le dialogue.
+                frame = null;
+                swappedFrame = null;
 
-                    LinearLayout layout = new LinearLayout(activity);
-                    layout.setOrientation(LinearLayout.VERTICAL);
-                    layout.setPadding(padding, padding, padding, padding);
+                activity.runOnUiThread(() -> showComparison(
+                        activity, metadata, originalForDialog, resultForDialog));
 
-                    TextView details = new TextView(activity);
-                    details.setText(description);
-                    layout.addView(details);
-
-                    ImageView imageView = new ImageView(activity);
-                    imageView.setAdjustViewBounds(true);
-                    imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    imageView.setImageBitmap(displayedFrame);
-                    layout.addView(imageView, new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT
-                    ));
-
-                    AlertDialog dialog = new AlertDialog.Builder(activity)
-                            .setTitle("Vidéo MP4 — aperçu V2")
-                            .setView(layout)
-                            .setPositiveButton("Fermer", null)
-                            .create();
-
-                    dialog.setOnDismissListener(ignored -> {
-                        imageView.setImageDrawable(null);
-                        if (!displayedFrame.isRecycled()) {
-                            displayedFrame.recycle();
-                        }
-                    });
-                    dialog.show();
-                });
             } catch (Exception error) {
-                if (preview != null && !preview.isRecycled()) {
-                    preview.recycle();
+                Log.e(TAG, "Erreur de traitement sur l'image vidéo", error);
+                final String description = error.getMessage() != null
+                        ? error.getMessage() : error.getClass().getSimpleName();
+                activity.runOnUiThread(() -> showMessage(activity,
+                        "Test vidéo impossible", description));
+
+            } finally {
+                if (engine != null) {
+                    engine.clearSource();
                 }
-                Log.e(TAG, "Lecture vidéo impossible", error);
-                activity.runOnUiThread(() -> {
-                    if (!activity.isFinishing() && !activity.isDestroyed()) {
-                        new AlertDialog.Builder(activity)
-                                .setTitle("Erreur de lecture vidéo")
-                                .setMessage(error.getMessage())
-                                .setPositiveButton("OK", null)
-                                .show();
-                    }
-                });
+                recycle(frame);
+                recycle(swappedFrame);
+                recycle(sourceCopy);
             }
         });
+    }
+
+    /** Affiche l'image originale et l'image traitée. */
+    private static void showComparison(
+            AppCompatActivity activity,
+            String metadata,
+            Bitmap original,
+            Bitmap swapped
+    ) {
+        if (activity.isFinishing() || activity.isDestroyed()) {
+            recycle(original);
+            recycle(swapped);
+            return;
+        }
+
+        int padding = dp(activity, 16);
+        ScrollView scrollView = new ScrollView(activity);
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(padding, padding, padding, padding);
+        scrollView.addView(content);
+
+        TextView info = new TextView(activity);
+        info.setText(metadata);
+        content.addView(info);
+
+        TextView before = new TextView(activity);
+        before.setText("AVANT — image extraite");
+        before.setPadding(0, padding, 0, dp(activity, 6));
+        content.addView(before);
+
+        ImageView originalView = addPreview(activity, content, original);
+
+        TextView after = new TextView(activity);
+        after.setText("APRÈS — face swap IA");
+        after.setPadding(0, padding, 0, dp(activity, 6));
+        content.addView(after);
+
+        ImageView swappedView = addPreview(activity, content, swapped);
+
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setTitle("V2 — Essai sur une image vidéo")
+                .setView(scrollView)
+                .setPositiveButton("Fermer", null)
+                .create();
+
+        dialog.setOnDismissListener(unused -> {
+            originalView.setImageDrawable(null);
+            swappedView.setImageDrawable(null);
+            recycle(original);
+            recycle(swapped);
+        });
+        dialog.show();
+    }
+
+    private static ImageView addPreview(
+            AppCompatActivity activity,
+            LinearLayout parent,
+            Bitmap bitmap
+    ) {
+        ImageView image = new ImageView(activity);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setAdjustViewBounds(true);
+        image.setImageBitmap(bitmap);
+        parent.addView(image, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 220)));
+        return image;
+    }
+
+    private static int dp(AppCompatActivity activity, int value) {
+        return (int) (value * activity.getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private static void showMessage(
+            AppCompatActivity activity,
+            String title,
+            String message
+    ) {
+        if (activity.isFinishing() || activity.isDestroyed()) {
+            return;
+        }
+        new AlertDialog.Builder(activity)
+                .setTitle(title)
+                .setMessage(message == null ? "Erreur inconnue" : message)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private static void recycle(Bitmap bitmap) {
+        if (bitmap != null && !bitmap.isRecycled()) {
+            bitmap.recycle();
+        }
     }
 }
