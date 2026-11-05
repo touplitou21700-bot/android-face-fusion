@@ -346,9 +346,13 @@ public final class VideoAudioRemuxer {
         if ((flags & MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME) != 0) {
             throw new IOException("Trames partielles non prises en charge");
         }
-        long reportedSize = extractor.getSampleSize();
-        if (reportedSize > buffer.capacity()) {
-            throw new IOException("Echantillon trop grand : " + reportedSize);
+        // getSampleSize() n'existe qu'a partir de l'API 28 (Android 9).
+        // Les API 26-27 utilisent directement readSampleData() ci-dessous.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            long reportedSize = extractor.getSampleSize();
+            if (reportedSize > buffer.capacity()) {
+                throw new IOException("Echantillon trop grand : " + reportedSize);
+            }
         }
         buffer.clear();
         int size = extractor.readSampleData(buffer, 0);
