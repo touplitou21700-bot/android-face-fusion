@@ -262,7 +262,11 @@ public final class VideoSequentialDecoder {
             Log.w(TAG, "Rotation video indisponible", e);
             return 0;
         } finally {
-            retriever.release();
+            try {
+                retriever.release();
+            } catch (IOException e) {
+                Log.w(TAG, "Impossible de liberer MediaMetadataRetriever", e);
+            }
         }
     }
 
