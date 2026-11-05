@@ -1,3 +1,4 @@
+
 plugins {
     alias(libs.plugins.android.application)
 }
@@ -9,15 +10,18 @@ android {
     }
 
     defaultConfig {
-        // Package V2 distinct : la V1 reste installee a cote.
+        // Identifiant distinct pour conserver la V1.
         applicationId = "com.pv.androidfacefusion.v2"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
+            abiFilters.addAll(
+                listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            )
         }
     }
 
@@ -47,12 +51,19 @@ dependencies {
     implementation(libs.activity)
     implementation(libs.constraintlayout)
 
-    // Inference IA et traitement d'image existants.
     implementation(libs.onnxruntime.android)
-    implementation(libs.glide)
+
+    // Glide 4.16.0 compatible avec compileSdk 36.
+    // Empeche la selection automatique de Glide 5.x.
+    implementation("com.github.bumptech.glide:glide") {
+        version {
+            strictly("4.16.0")
+        }
+    }
+
     implementation(libs.opencv)
 
-    // Etape 25 - segmentation locale cheveux / visage.
+    // Etape 25 : segmentation cheveux et visage.
     implementation("com.google.mediapipe:tasks-vision:0.10.35")
 
     testImplementation(libs.junit)
