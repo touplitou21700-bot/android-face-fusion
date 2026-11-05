@@ -401,7 +401,7 @@ public class MainActivity extends AppCompatActivity
                 new ActivityResultContracts.GetContent(),
                 uri -> {
                     if (uri != null) {
-                        analyzeSelectedVideo(uri);
+                        VideoPreviewHelper.analyze(this, uri, executorService);
                     }
                 }
         );
