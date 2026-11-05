@@ -401,7 +401,15 @@ public class MainActivity extends AppCompatActivity
                 new ActivityResultContracts.GetContent(),
                 uri -> {
                     if (uri != null) {
-                        VideoPreviewHelper.analyze(this, uri, executorService);
+                        VideoPreviewHelper.analyze(
+    this,
+    uri,
+    executorService,
+    sourceBitmap,
+    faceDetector,
+    faceEmbedder,
+    processor
+);
                     }
                 }
         );
