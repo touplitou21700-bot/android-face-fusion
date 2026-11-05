@@ -12,7 +12,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pv.androidfacefusion"
+        applicationId = "com.pv.androidfacefusion.v2"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
