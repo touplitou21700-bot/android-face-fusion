@@ -26,7 +26,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Android Face Fusion V2 - ETAPE 18.
+ * Android Face Fusion V2 - ETAPE 25 : menu de segmentation ajoute.
  *
  * Raccordement de l'interface video au pipeline IA + MP4 + audio des
  * etapes 12 a 17, tout en conservant l'apercu des etapes 9 a 11.
@@ -76,14 +76,17 @@ public final class VideoV2UiController {
                 .setTitle("Face Fusion V2 - video")
                 .setItems(new String[]{
                         "Apercus IA (1 ou 6 images)",
-                        "Creer un MP4 de test (2 a 3 s)"
+                        "Creer un MP4 de test (2 a 3 s)",
+                        "Test Head Swap - masque tete (photo source)"
                 }, (dialog, which) -> {
                     if (which == 0) {
                         VideoPreviewHelper.analyze(activity, videoUri, executor,
                                 sourceBitmap, detector, embedder, processor);
-                    } else {
+                    } else if (which == 1) {
                         startMp4Test(activity, videoUri, executor, sourceBitmap,
                                 detector, embedder, processor);
+                    } else if (which == 2) {
+                        HeadSwapMaskPreview.showForSource(activity, executor, sourceBitmap);
                     }
                 })
                 .setNegativeButton("Annuler", null)
