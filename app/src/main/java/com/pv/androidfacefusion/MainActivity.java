@@ -401,7 +401,7 @@ public class MainActivity extends AppCompatActivity
                 new ActivityResultContracts.GetContent(),
                 uri -> {
                     if (uri != null) {
-                        VideoPreviewHelper.analyze(
+                        VideoV2UiController.open(
     this,
     uri,
     executorService,
