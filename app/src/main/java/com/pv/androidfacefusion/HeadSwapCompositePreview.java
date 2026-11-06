@@ -122,8 +122,18 @@ public final class HeadSwapCompositePreview {
                             ? error.toString() : error.getMessage();
                     activity.runOnUiThread(() -> {
                         progress.dismiss();
-                        message(activity, "Fusion impossible", details
-                                + "\n\nChoisis une video avec une seule tete de face.");
+                        boolean isModelIssue = details.contains("Face Landmarker")
+                                || details.contains("face_landmarker.task")
+                                || details.contains("git-lfs.github.com");
+                        String help = isModelIssue
+                                ? "\n\nLe probleme vient du modele de pose 3D, "
+                                + "pas de la video. Verifie le fichier .task dans "
+                                + "app/src/main/assets/ sur la branche v2-video."
+                                : "\n\nVerifie la presence d'un visage net "
+                                + "dans la photo source et dans la video cible.";
+                        message(activity, isModelIssue
+                                ? "Modele 3D indisponible" : "Fusion impossible",
+                                details + help);
                     });
                 } finally {
                     if (target != null && !target.isRecycled()) target.recycle();
