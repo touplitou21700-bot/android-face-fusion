@@ -26,7 +26,7 @@ import java.io.OutputStream;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
-/** Interface de l'ETAPE 36 : premier Head Swap video, 2 secondes environ. */
+/** Interface de l'ETAPE 36B : Head Swap video jusqu'a 5 secondes. */
 public final class HeadSwapVideoTestUi {
     private static final String TAG = "HeadSwapVideoTestUi";
 
@@ -46,7 +46,7 @@ public final class HeadSwapVideoTestUi {
         box.setPadding(pad, pad, pad, pad);
         TextView description = new TextView(activity);
         description.setText("Premier test Head Swap video : selectionne une video "
-                + "de 1 a 2 secondes (max 2,3 s). Les reglages ci-dessous "
+                + "de 5 secondes maximum. Les reglages ci-dessous "
                 + "s'appliquent a toutes les images. L'orientation 3D ajoute "
                 + "sa correction automatiquement.");
         box.addView(description);
@@ -113,8 +113,8 @@ public final class HeadSwapVideoTestUi {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(pad, pad, pad, pad);
         TextView info = new TextView(activity);
-        info.setText("Head Swap VIDEO experimental : 2 secondes environ, "
-                + "150 images maximum, 480 pixels maximum.\n"
+        info.setText("Head Swap VIDEO experimental : 5 secondes maximum, "
+                + "300 images maximum, 480 pixels maximum.\n"
                 + "Le traitement peut etre lent : garde l'application ouverte.");
         layout.addView(info);
         ProgressBar bar = new ProgressBar(activity, null,
