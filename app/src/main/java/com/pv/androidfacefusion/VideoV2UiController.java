@@ -26,7 +26,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Android Face Fusion V2 - ETAPE 27 : ajout du test d'extraction de la tete source.
+ * Android Face Fusion V2 - ETAPE 29 : ajout du test de positionnement de la tete sur une image cible.
  *
  * Raccordement de l'interface video au pipeline IA + MP4 + audio des
  * etapes 12 a 17, tout en conservant l'apercu des etapes 9 a 11.
@@ -78,7 +78,8 @@ public final class VideoV2UiController {
                         "Apercus IA (1 ou 6 images)",
                         "Creer un MP4 de test (2 a 3 s)",
                         "Test Head Swap - masque tete (photo source)",
-                        "Test Head Swap - extraction tete source"
+                        "Test Head Swap - extraction tete source",
+                        "Test Head Swap - alignement sur video"
                 }, (dialog, which) -> {
                     if (which == 0) {
                         VideoPreviewHelper.analyze(activity, videoUri, executor,
@@ -91,6 +92,9 @@ public final class VideoV2UiController {
                     } else if (which == 3) {
                         HeadSwapMaskPreview.showExtractionForSource(
                                 activity, executor, sourceBitmap);
+                    } else if (which == 4) {
+                        HeadSwapAlignmentPreview.showForVideo(
+                                activity, executor, sourceBitmap, videoUri);
                     }
                 })
                 .setNegativeButton("Annuler", null)
