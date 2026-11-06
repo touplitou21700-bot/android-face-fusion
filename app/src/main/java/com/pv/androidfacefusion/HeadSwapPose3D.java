@@ -1,6 +1,7 @@
 package com.pv.androidfacefusion;
 
 import android.content.Context;
+import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 
 import com.google.mediapipe.framework.image.BitmapImageBuilder;
@@ -10,6 +11,12 @@ import com.google.mediapipe.tasks.vision.core.RunningMode;
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker;
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -83,10 +90,15 @@ public final class HeadSwapPose3D {
                 || source.isRecycled() || target.isRecycled()) {
             throw new IllegalArgumentException("Images non disponibles pour la pose 3D.");
         }
+        // Charger explicitement le modele depuis les assets Android. Un tampon
+        // direct evite le chemin natif MediaPipe PathToResourceAsFile() qui
+        // peut afficher "doesn't have a slash in it" si l'asset est absent.
+        // L'erreur devient claire si le fichier n'est pas empaquete.
+        final ByteBuffer modelBuffer = loadLandmarkerModel(context);
         FaceLandmarker.FaceLandmarkerOptions options =
                 FaceLandmarker.FaceLandmarkerOptions.builder()
                         .setBaseOptions(BaseOptions.builder()
-                                .setModelAssetPath(MODEL_ASSET).build())
+                                .setModelAssetBuffer(modelBuffer).build())
                         .setRunningMode(RunningMode.IMAGE)
                         .setNumFaces(1)
                         .setOutputFacialTransformationMatrixes(true)
@@ -125,6 +137,57 @@ public final class HeadSwapPose3D {
         int db = Math.round(clamp(dst.skinB - src.skinB, -32f, 32f));
         return new Match(compatible, warning, src, dst,
                 eyeX, eyeY, chinX, chinY, eyeDistance, scale, dr, dg, db);
+    }
+
+    /**
+     * Retourne un ByteBuffer DIRECT avec le veritable modele .task.
+     * BaseOptions exige un tampon direct ou un MappedByteBuffer.
+     *
+     * La lecture fonctionne meme si l'asset est compresse dans l'APK. Le
+     * controle de taille et de signature detecte aussi un pointeur Git LFS
+     * a la place du fichier binaire.
+     */
+    private static ByteBuffer loadLandmarkerModel(Context context) throws IOException {
+        final int maxModelBytes = 64 * 1024 * 1024;
+        byte[] data;
+        try (InputStream input = context.getAssets().open(
+                MODEL_ASSET, AssetManager.ACCESS_STREAMING);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] block = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(block)) != -1) {
+                if (read == 0) continue;
+                if (output.size() > maxModelBytes - read) {
+                    throw new IOException("Modele Face Landmarker trop volumineux "
+                            + "(plus de 64 Mo). Verifie le fichier .task.");
+                }
+                output.write(block, 0, read);
+            }
+            data = output.toByteArray();
+        } catch (IOException e) {
+            throw new IOException("Modele Face Landmarker inaccessible dans l'APK : "
+                    + MODEL_ASSET + ". Verifie sa presence dans "
+                    + "app/src/main/assets/ sur la branche v2-video, "
+                    + "puis lance une nouvelle compilation. "
+                    + "Detail : " + e.getMessage(), e);
+        }
+        String header = new String(data, 0, Math.min(80, data.length),
+                StandardCharsets.US_ASCII);
+        if (header.startsWith("version https://git-lfs.github.com/spec/v1")) {
+            throw new IOException("Modele Face Landmarker invalide : le fichier "
+                    + "est un pointeur Git LFS, et non le vrai modele binaire. "
+                    + "Ajoute le fichier .task original dans les assets.");
+        }
+        if (data.length < 100 * 1024) {
+            throw new IOException("Modele Face Landmarker invalide ou tronque ("
+                    + data.length + " octets). Ajoute le vrai fichier binaire "
+                    + MODEL_ASSET + " dans app/src/main/assets/.");
+        }
+        ByteBuffer direct = ByteBuffer.allocateDirect(data.length)
+                .order(ByteOrder.nativeOrder());
+        direct.put(data);
+        direct.rewind();
+        return direct;
     }
 
     private static Pose inspect(FaceLandmarker detector, Bitmap bitmap, String label) {
