@@ -163,6 +163,19 @@ public final class HeadSwapCompositePreview {
                 + "Pour de meilleurs resultats, prends une source orientee comme la cible.");
         column.addView(info);
 
+        TextView warning = new TextView(activity);
+        if (pose.compatible) {
+            warning.setText("Pose 3D compatible : la tete source doit etre visible "
+                    + "dans l'apercu ci-dessous.");
+        } else {
+            warning.setText("DIAGNOSTIC : MediaPipe estime les poses differentes. "
+                    + "L'ancienne version masquait alors completement la tete source "
+                    + "SANS afficher d'erreur. Ici, le test 2D est active pour "
+                    + "voir la tete importee. Le rendu peut etre peu naturel.");
+        }
+        warning.setPadding(0, dp(activity, 8), 0, dp(activity, 8));
+        column.addView(warning);
+
         CompositeView preview = new CompositeView(activity, prepared);
         LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 290));
@@ -202,6 +215,14 @@ public final class HeadSwapCompositePreview {
         trimNeck.setChecked(false);
         column.addView(trimNeck);
 
+        CheckBox force2D = new CheckBox(activity);
+        force2D.setText("Afficher la tete source meme si les poses 3D different "
+                + "(superposition 2D experimentale)");
+        force2D.setChecked(!pose.compatible);
+        column.addView(force2D);
+        // Conserve une reference au bouton apres l'affichage de la boite.
+        final Button[] saveButton = new Button[1];
+
         Runnable refresh = () -> {
             float dx = (x.getProgress() - 100) / 100f;
             float dy = (y.getProgress() - 100) / 100f;
@@ -211,7 +232,10 @@ public final class HeadSwapCompositePreview {
             int colorStrength = color.getProgress();
             HeadSwapCompositor.Settings settings = new HeadSwapCompositor.Settings(
                     dx, dy, sizeFactor, degrees, featherPx, colorStrength);
-            preview.setSettings(settings, trimNeck.isChecked());
+            preview.setSettings(settings, trimNeck.isChecked(), force2D.isChecked());
+            if (saveButton[0] != null) {
+                saveButton[0].setEnabled(pose.compatible || force2D.isChecked());
+            }
             values.setText(String.format(Locale.FRANCE,
                     "X : %+d%% | Y : %+d%% | Taille : %d%% | Angle : %+.0f° "
                             + "| Fondu : %d px | Couleur : %d%%",
@@ -222,6 +246,7 @@ public final class HeadSwapCompositePreview {
         attach(x, refresh); attach(y, refresh); attach(size, refresh);
         attach(angle, refresh); attach(feather, refresh); attach(color, refresh);
         trimNeck.setOnCheckedChangeListener((buttonView, checked) -> refresh.run());
+        force2D.setOnCheckedChangeListener((buttonView, checked) -> refresh.run());
         refresh.run();
 
         Button reapplyAngle = new Button(activity);
@@ -238,6 +263,7 @@ public final class HeadSwapCompositePreview {
             angle.setProgress(90 + initialAngle);
             feather.setProgress(8); color.setProgress(60);
             trimNeck.setChecked(false);
+            force2D.setChecked(!pose.compatible);
             refresh.run();
         });
         column.addView(reset);
@@ -247,8 +273,9 @@ public final class HeadSwapCompositePreview {
         notes.setText(String.format(Locale.FRANCE,
                 "Surface detectee : source %.1f%%, cible %.1f%%.\n"
                         + "L'aperçu et le PNG utilisent les mêmes reglages. "
-                        + "Pour une pose 3D differente, le collage est desactive "
-                        + "et il faut choisir une photo source plus proche.",
+                        + "Si les poses sont differentes, l'affichage 2D peut etre "
+                        + "active pour diagnostiquer le collage, mais ne corrige "
+                        + "pas un vrai ecart de profil.",
                 alignment.sourceHeadPercent, alignment.targetHeadPercent));
         column.addView(notes);
 
@@ -267,10 +294,11 @@ public final class HeadSwapCompositePreview {
         dialog.setOnShowListener(d -> {
             Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
             if (save != null) {
-                save.setEnabled(pose.compatible);
+                saveButton[0] = save;
+                save.setEnabled(pose.compatible || force2D.isChecked());
                 save.setOnClickListener(v -> savePreview(
                         activity, executor, prepared, preview.settings,
-                        preview.trimNeck));
+                        preview.trimNeck, preview.force2D));
             }
         });
         dialog.show();
@@ -281,7 +309,7 @@ public final class HeadSwapCompositePreview {
                                     ExecutorService executor,
                                     HeadSwapPoseCompositor.Prepared prepared,
                                     HeadSwapCompositor.Settings settings,
-                                    boolean trimNeck) {
+                                    boolean trimNeck, boolean force2D) {
         if (!active(activity)) return;
         if (executor == null || executor.isShutdown()) {
             message(activity, "Export indisponible", "Le moteur de travail est arrete.");
@@ -289,7 +317,8 @@ public final class HeadSwapCompositePreview {
         }
         final Bitmap picture;
         try {
-            picture = HeadSwapPoseCompositor.compose(prepared, settings, trimNeck);
+            picture = HeadSwapPoseCompositor.compose(prepared, settings,
+                    trimNeck, force2D);
         } catch (Exception error) {
             message(activity, "Image non creee", error.getMessage());
             return;
@@ -365,6 +394,7 @@ public final class HeadSwapCompositePreview {
         private final HeadSwapPoseCompositor.Prepared prepared;
         private HeadSwapCompositor.Settings settings = HeadSwapCompositor.Settings.defaults();
         private boolean trimNeck = false;
+        private boolean force2D = false;
 
         CompositeView(AppCompatActivity activity,
                       HeadSwapPoseCompositor.Prepared prepared) {
@@ -373,9 +403,11 @@ public final class HeadSwapCompositePreview {
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void setSettings(HeadSwapCompositor.Settings next, boolean trim) {
+        void setSettings(HeadSwapCompositor.Settings next, boolean trim,
+                         boolean force) {
             settings = next;
             trimNeck = trim;
+            force2D = force;
             invalidate();
         }
 
@@ -395,7 +427,8 @@ public final class HeadSwapCompositePreview {
             try {
                 canvas.translate(left, top);
                 canvas.scale(scale, scale);
-                HeadSwapPoseCompositor.draw(canvas, prepared, settings, trimNeck);
+                HeadSwapPoseCompositor.draw(canvas, prepared, settings,
+                        trimNeck, force2D);
             } finally {
                 canvas.restore();
             }
