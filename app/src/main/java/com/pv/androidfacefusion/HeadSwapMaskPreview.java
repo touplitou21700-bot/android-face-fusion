@@ -33,6 +33,14 @@ public final class HeadSwapMaskPreview {
         container.addView(button);
     }
 
+    /** Lance le diagnostic directement depuis le menu video, sans changer MainActivity. */
+    public static void showForSource(
+            AppCompatActivity activity,
+            ExecutorService executor,
+            Bitmap sourceBitmap) {
+        start(activity, executor, () -> sourceBitmap);
+    }
+
     private static void start(AppCompatActivity activity,
                               ExecutorService executor,
                               Supplier<Bitmap> sourceSupplier) {
