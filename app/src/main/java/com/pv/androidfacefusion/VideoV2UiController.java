@@ -26,7 +26,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Android Face Fusion V2 - ETAPE 29 : ajout du test de positionnement de la tete sur une image cible.
+ * Android Face Fusion V2 - ETAPE 31 : ajout du test de fusion sur une image cible.
  *
  * Raccordement de l'interface video au pipeline IA + MP4 + audio des
  * etapes 12 a 17, tout en conservant l'apercu des etapes 9 a 11.
@@ -79,7 +79,8 @@ public final class VideoV2UiController {
                         "Creer un MP4 de test (2 a 3 s)",
                         "Test Head Swap - masque tete (photo source)",
                         "Test Head Swap - extraction tete source",
-                        "Test Head Swap - alignement sur video"
+                        "Test Head Swap - alignement sur video",
+                        "Test Head Swap - fusion sur image cible"
                 }, (dialog, which) -> {
                     if (which == 0) {
                         VideoPreviewHelper.analyze(activity, videoUri, executor,
@@ -94,6 +95,9 @@ public final class VideoV2UiController {
                                 activity, executor, sourceBitmap);
                     } else if (which == 4) {
                         HeadSwapAlignmentPreview.showForVideo(
+                                activity, executor, sourceBitmap, videoUri);
+                    } else if (which == 5) {
+                        HeadSwapCompositePreview.showForVideo(
                                 activity, executor, sourceBitmap, videoUri);
                     }
                 })
