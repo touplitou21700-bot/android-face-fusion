@@ -29,18 +29,29 @@ public final class HeadSwapAlignmentEngine {
         public final float baseScale;
         public final float sourceHeadPercent;
         public final float targetHeadPercent;
+        /** Repere de la source reduite a 640 px, avant recadrage. */
+        public final int sourceScaledWidth;
+        public final int sourceScaledHeight;
+        public final int sourceCropLeft;
+        public final int sourceCropTop;
 
         private boolean closed;
 
         private Result(Bitmap targetFrame, Bitmap sourceHead, RectF bounds,
                        float baseScale, float sourceHeadPercent,
-                       float targetHeadPercent) {
+                       float targetHeadPercent, int sourceScaledWidth,
+                       int sourceScaledHeight, int sourceCropLeft,
+                       int sourceCropTop) {
             this.targetFrame = targetFrame;
             this.sourceHead = sourceHead;
             this.targetHeadBounds = bounds;
             this.baseScale = baseScale;
             this.sourceHeadPercent = sourceHeadPercent;
             this.targetHeadPercent = targetHeadPercent;
+            this.sourceScaledWidth = sourceScaledWidth;
+            this.sourceScaledHeight = sourceScaledHeight;
+            this.sourceCropLeft = sourceCropLeft;
+            this.sourceCropTop = sourceCropTop;
         }
 
         @Override
@@ -101,7 +112,9 @@ public final class HeadSwapAlignmentEngine {
             }
 
             Result result = new Result(targetFrame, src.headBitmap, bounds,
-                    baseScale, src.headPercent, dst.headPercent);
+                    baseScale, src.headPercent, dst.headPercent,
+                    src.sourceWidth, src.sourceHeight,
+                    src.cropLeft, src.cropTop);
             success = true;
             return result;
         } finally {
