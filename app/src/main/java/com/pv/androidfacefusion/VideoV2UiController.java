@@ -35,7 +35,7 @@ import java.util.concurrent.ExecutorService;
  * 150 images maximum, cote d'image de sortie <= 480 pixels.
  * Les videos plus longues sont REFUSEES et non decoupees automatiquement.
  *
- * Le nouveau mode 7 produit un Head Swap VIDEO experimental de 2 secondes.
+ * Le nouveau mode 7 produit un Head Swap VIDEO experimental de 5 secondes.
  * Ne garantit pas la compatibilite de tous les codecs Android.
  * Ne pas publier de faux contenus intimes de personnes non consentantes.
  */
@@ -81,7 +81,7 @@ public final class VideoV2UiController {
                         "Test Head Swap - extraction tete source",
                         "Test Head Swap - alignement sur video",
                         "Test Head Swap - fusion sur image cible",
-                        "Creer un MP4 Head Swap (test 2 s)"
+                        "Creer un MP4 Head Swap (max 5 s)"
                 }, (dialog, which) -> {
                     if (which == 0) {
                         VideoPreviewHelper.analyze(activity, videoUri, executor,
