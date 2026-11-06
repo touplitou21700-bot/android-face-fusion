@@ -188,8 +188,8 @@ public final class HeadSwapCompositePreview {
         SeekBar color = slider(activity, column,
                 "Harmonisation de la peau (0 = desactivee)", 60, 100);
         CheckBox trimNeck = new CheckBox(activity);
-        trimNeck.setText("Eviter les debordements sous le menton");
-        trimNeck.setChecked(true);
+        trimNeck.setText("Attenuer sous le menton (option facultative)");
+        trimNeck.setChecked(false);
         column.addView(trimNeck);
 
         Runnable refresh = () -> {
@@ -227,7 +227,7 @@ public final class HeadSwapCompositePreview {
             x.setProgress(100); y.setProgress(100); size.setProgress(100);
             angle.setProgress(90 + initialAngle);
             feather.setProgress(8); color.setProgress(60);
-            trimNeck.setChecked(true);
+            trimNeck.setChecked(false);
             refresh.run();
         });
         column.addView(reset);
@@ -354,7 +354,7 @@ public final class HeadSwapCompositePreview {
     private static final class CompositeView extends View {
         private final HeadSwapPoseCompositor.Prepared prepared;
         private HeadSwapCompositor.Settings settings = HeadSwapCompositor.Settings.defaults();
-        private boolean trimNeck = true;
+        private boolean trimNeck = false;
 
         CompositeView(AppCompatActivity activity,
                       HeadSwapPoseCompositor.Prepared prepared) {
