@@ -13,6 +13,8 @@ import android.graphics.RectF;
  * de la cible. Elle ne remplace ni le moteur MP4, ni un modele de pose 3D.
  * La source est affichee a pleine opacite a l'interieur du masque ; seul son
  * contour transparent est module par le reglage de fondu.
+ * Un ajustement tres leger des couleurs pres du bord est optionnel. Il ne
+ * remplace pas une harmonisation de lumiere, de pose 3D ou des ombres.
  */
 public final class HeadSwapCompositor {
 
@@ -28,18 +30,26 @@ public final class HeadSwapCompositor {
         public final float sizeFactor;
         public final float rotationDegrees;
         public final int featherPx;
+        /** Intensite du raccord de couleur local au bord : 0..100. */
+        public final int edgeColorPercent;
 
         public Settings(float offsetX, float offsetY, float sizeFactor,
                         float rotationDegrees, int featherPx) {
+            this(offsetX, offsetY, sizeFactor, rotationDegrees, featherPx, 0);
+        }
+
+        public Settings(float offsetX, float offsetY, float sizeFactor,
+                        float rotationDegrees, int featherPx, int edgeColorPercent) {
             this.offsetX = clampFinite(offsetX, -1f, 1f, 0f);
             this.offsetY = clampFinite(offsetY, -1f, 1f, 0f);
             this.sizeFactor = clampFinite(sizeFactor, .5f, 1.5f, 1f);
             this.rotationDegrees = clampFinite(rotationDegrees, -90f, 90f, 0f);
             this.featherPx = Math.max(0, Math.min(MAX_FEATHER_PX, featherPx));
+            this.edgeColorPercent = Math.max(0, Math.min(100, edgeColorPercent));
         }
 
         public static Settings defaults() {
-            return new Settings(0f, 0f, 1f, 0f, 8);
+            return new Settings(0f, 0f, 1f, 0f, 12, 45);
         }
     }
 
@@ -52,19 +62,28 @@ public final class HeadSwapCompositor {
         public final HeadSwapAlignmentEngine.Result alignment;
         private final int[] sourcePixels;
         private final int[] edgeDistances;
+        private final int[] targetPixels;
+        private final int targetWidth;
+        private final int targetHeight;
         private final int width;
         private final int height;
         private Bitmap featheredBitmap;
+        private Bitmap edgeMatchedBitmap;
         private int cachedFeather = -1;
+        private Settings cachedSettings;
         private boolean closed;
 
         private Prepared(HeadSwapAlignmentEngine.Result alignment,
-                         int[] sourcePixels, int[] edgeDistances) {
+                         int[] sourcePixels, int[] edgeDistances,
+                         int[] targetPixels) {
             this.alignment = alignment;
             this.sourcePixels = sourcePixels;
             this.edgeDistances = edgeDistances;
+            this.targetPixels = targetPixels;
             width = alignment.sourceHead.getWidth();
             height = alignment.sourceHead.getHeight();
+            targetWidth = alignment.targetFrame.getWidth();
+            targetHeight = alignment.targetFrame.getHeight();
         }
 
         private Bitmap getHead(int featherPx) {
@@ -100,6 +119,74 @@ public final class HeadSwapCompositor {
             return updated;
         }
 
+        /**
+         * Ajuste legerement les teintes pres du bord selon les pixels sous la
+         * tete source. Le coeur de l'image et les cheveux restent inchanges.
+         * Correction plafonnee a +/- 28 par canal, reversible via le curseur.
+         * Cachee pour ne pas recreer les bitmaps si rien n'a change.
+         */
+        private Bitmap getHeadForPlacement(Settings settings, float cx, float cy) {
+            Bitmap base = getHead(settings.featherPx);
+            if (settings.edgeColorPercent <= 0) return base;
+            if (sameSettings(cachedSettings, settings)
+                    && edgeMatchedBitmap != null && !edgeMatchedBitmap.isRecycled()) {
+                return edgeMatchedBitmap;
+            }
+            float displayScale = alignment.baseScale * settings.sizeFactor;
+            float radians = (float) Math.toRadians(settings.rotationDegrees);
+            float cos = (float) Math.cos(radians);
+            float sin = (float) Math.sin(radians);
+            float maxEdgeDistance = Math.max(10f, settings.featherPx + 12f);
+            float strength = settings.edgeColorPercent / 100f * .70f;
+            int[] altered = new int[sourcePixels.length];
+            base.getPixels(altered, 0, width, 0, 0, width, height);
+            for (int y = 0; y < height; y++) {
+                float dy = (y + .5f - height * .5f) * displayScale;
+                for (int x = 0; x < width; x++) {
+                    int i = y * width + x;
+                    int pixel = altered[i];
+                    if (Color.alpha(pixel) == 0) continue;
+                    float edgeDistance = edgeDistances[i] / 10f;
+                    float rim = 1f - Math.min(1f, Math.max(0f,
+                            (edgeDistance - 1f) / maxEdgeDistance));
+                    if (rim <= 0f) continue;
+                    float dx = (x + .5f - width * .5f) * displayScale;
+                    int tx = Math.round(cx + cos * dx - sin * dy);
+                    int ty = Math.round(cy + sin * dx + cos * dy);
+                    if (tx < 0 || ty < 0 || tx >= targetWidth || ty >= targetHeight) {
+                        continue;
+                    }
+                    int underneath = targetPixels[ty * targetWidth + tx];
+                    float weight = strength * rim;
+                    int r = adjust(Color.red(pixel), Color.red(underneath), weight);
+                    int g = adjust(Color.green(pixel), Color.green(underneath), weight);
+                    int b = adjust(Color.blue(pixel), Color.blue(underneath), weight);
+                    altered[i] = Color.argb(Color.alpha(pixel), r, g, b);
+                }
+            }
+            Bitmap adjusted = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            adjusted.setPixels(altered, 0, width, 0, 0, width, height);
+            Bitmap old = edgeMatchedBitmap;
+            edgeMatchedBitmap = adjusted;
+            cachedSettings = settings;
+            if (old != null && !old.isRecycled()) old.recycle();
+            return adjusted;
+        }
+
+        private static int adjust(int source, int target, float strength) {
+            int limitedDifference = Math.max(-28, Math.min(28, target - source));
+            return Math.max(0, Math.min(255,
+                    source + Math.round(limitedDifference * strength)));
+        }
+
+        private static boolean sameSettings(Settings a, Settings b) {
+            return a != null && a.featherPx == b.featherPx
+                    && a.edgeColorPercent == b.edgeColorPercent
+                    && a.offsetX == b.offsetX && a.offsetY == b.offsetY
+                    && a.sizeFactor == b.sizeFactor
+                    && a.rotationDegrees == b.rotationDegrees;
+        }
+
         @Override
         public void close() {
             if (closed) return;
@@ -108,6 +195,11 @@ public final class HeadSwapCompositor {
                 featheredBitmap.recycle();
             }
             featheredBitmap = null;
+            if (edgeMatchedBitmap != null && !edgeMatchedBitmap.isRecycled()) {
+                edgeMatchedBitmap.recycle();
+            }
+            edgeMatchedBitmap = null;
+            cachedSettings = null;
         }
     }
 
@@ -125,7 +217,11 @@ public final class HeadSwapCompositor {
         int[] pixels = new int[width * height];
         head.getPixels(pixels, 0, width, 0, 0, width, height);
         int[] distances = distanceToTransparent(pixels, width, height);
-        return new Prepared(alignment, pixels, distances);
+        int tw = alignment.targetFrame.getWidth();
+        int th = alignment.targetFrame.getHeight();
+        int[] targetPixels = new int[tw * th];
+        alignment.targetFrame.getPixels(targetPixels, 0, tw, 0, 0, tw, th);
+        return new Prepared(alignment, pixels, distances, targetPixels);
     }
 
     /**
@@ -176,7 +272,7 @@ public final class HeadSwapCompositor {
         RectF placement = new RectF(cx - headW / 2f, cy - headH / 2f,
                 cx + headW / 2f, cy + headH / 2f);
 
-        Bitmap head = prepared.getHead(settings.featherPx);
+        Bitmap head = prepared.getHeadForPlacement(settings, cx, cy);
         canvas.save();
         try {
             canvas.rotate(settings.rotationDegrees, cx, cy);
