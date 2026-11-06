@@ -15,6 +15,7 @@ import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -31,9 +32,8 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Etape 31 - fusion alpha sur UNE image tiree de la video.
- * Affiche le resultat final (sans transparence artificielle sur la tete),
- * permet d'ajuster X/Y/taille/rotation/fondu et d'exporter un PNG.
+ * Etape 33 - alignement par reperes du visage + verification de pose 3D.
+ * Pose pour limiter les collages incoherents, sans reconstruire de nouvelles vues.
  * Ne change pas la video source et n'encode aucun MP4.
  */
 public final class HeadSwapCompositePreview {
@@ -82,16 +82,22 @@ public final class HeadSwapCompositePreview {
             executor.execute(() -> {
                 Bitmap target = null;
                 HeadSwapAlignmentEngine.Result alignment = null;
-                HeadSwapCompositor.Prepared prepared = null;
+                HeadSwapPoseCompositor.Prepared prepared = null;
                 try {
                     target = firstVideoFrame(activity, videoUri);
                     alignment = HeadSwapAlignmentEngine.prepare(
                             activity.getApplicationContext(), sourceCopy, target);
                     // prepare() transfere la propriete de target a alignment.
                     target = null;
-                    prepared = HeadSwapCompositor.prepare(alignment);
+                    // Reperes 3D calcules uniquement sur cette image fixe.
+                    // Pose trop differente : on affiche la cible, sans faux collage.
+                    HeadSwapPose3D.Match pose = HeadSwapPose3D.estimate(
+                            activity.getApplicationContext(), sourceCopy,
+                            alignment.targetFrame, alignment);
+                    prepared = HeadSwapPoseCompositor.prepare(alignment, pose);
                     HeadSwapAlignmentEngine.Result readyAlignment = alignment;
-                    HeadSwapCompositor.Prepared readyPrepared = prepared;
+                    HeadSwapPoseCompositor.Prepared readyPrepared = prepared;
+                    HeadSwapPose3D.Match readyPose = pose;
                     activity.runOnUiThread(() -> {
                         progress.dismiss();
                         if (!active(activity)) {
@@ -100,7 +106,8 @@ public final class HeadSwapCompositePreview {
                             return;
                         }
                         try {
-                            showDialog(activity, executor, readyAlignment, readyPrepared);
+                            showDialog(activity, executor, readyAlignment,
+                                    readyPrepared, readyPose);
                         } catch (Exception displayError) {
                             readyPrepared.close();
                             readyAlignment.close();
@@ -132,16 +139,18 @@ public final class HeadSwapCompositePreview {
 
     private static void showDialog(AppCompatActivity activity, ExecutorService executor,
                                    HeadSwapAlignmentEngine.Result alignment,
-                                   HeadSwapCompositor.Prepared prepared) {
+                                   HeadSwapPoseCompositor.Prepared prepared,
+                                   HeadSwapPose3D.Match pose) {
         int pad = dp(activity, 12);
         LinearLayout column = new LinearLayout(activity);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setPadding(pad, pad, pad, pad);
 
         TextView info = new TextView(activity);
-        info.setText("Fusion alpha reelle sur une image fixe de la video.\n"
-                + "Les cheveux et le visage source sont fusionnes sur la tete cible.\n"
-                + "Ce test 2D ne corrige ni les profils 3D, ni le cou, ni la lumiere.");
+        info.setText("Etape 33 : repères faciaux 3D et alignement sur les yeux. "
+                + "Une seule image fixe est modifiee, jamais le MP4.\n"
+                + "La pose 3D n'invente pas les cheveux ni le profil cache. "
+                + "Pour de meilleurs resultats, prends une source orientee comme la cible.");
         column.addView(info);
 
         CompositeView preview = new CompositeView(activity, prepared);
@@ -150,16 +159,38 @@ public final class HeadSwapCompositePreview {
         imageParams.topMargin = dp(activity, 8);
         column.addView(preview, imageParams);
 
+        TextView poseText = new TextView(activity);
+        poseText.setPadding(0, dp(activity, 8), 0, dp(activity, 8));
+        poseText.setText(String.format(Locale.FRANCE,
+                "Pose source : yaw %+.0f°, pitch %+.0f°, inclinaison %+.0f°\n"
+                + "Pose cible : yaw %+.0f°, pitch %+.0f°, inclinaison %+.0f°\n"
+                + "Alignement initial par les yeux : rotation %+.0f°\n%s",
+                pose.sourceYaw, pose.sourcePitch, pose.sourceRoll,
+                pose.targetYaw, pose.targetPitch, pose.targetRoll,
+                pose.correctionRoll,
+                pose.compatible ? "Poses compatibles (estimation)."
+                        : "ATTENTION : " + pose.warning));
+        column.addView(poseText);
+
         TextView values = new TextView(activity);
         values.setPadding(0, dp(activity, 8), 0, dp(activity, 5));
         column.addView(values);
 
-        SeekBar x = slider(activity, column, "Deplacement horizontal X", 100, 200);
-        SeekBar y = slider(activity, column, "Deplacement vertical Y", 100, 200);
-        SeekBar size = slider(activity, column, "Taille de la tete", 100, 200);
-        SeekBar angle = slider(activity, column, "Angle 2D (-90° a +90°)", 90, 180);
+        int initialAngle = Math.max(-90, Math.min(90,
+                Math.round(pose.correctionRoll)));
+        SeekBar x = slider(activity, column, "Ajustement horizontal X", 100, 200);
+        SeekBar y = slider(activity, column, "Ajustement vertical Y", 100, 200);
+        SeekBar size = slider(activity, column, "Taille relative (base sur les yeux)", 100, 200);
+        SeekBar angle = slider(activity, column, "Angle 2D (-90 a +90 degres)",
+                90 + initialAngle, 180);
         SeekBar feather = slider(activity, column,
-                "Fondu des bords (0 = masque original)", 8, 24);
+                "Adoucissement contour (0 = masque original)", 8, 24);
+        SeekBar color = slider(activity, column,
+                "Harmonisation de la peau (0 = desactivee)", 60, 100);
+        CheckBox trimNeck = new CheckBox(activity);
+        trimNeck.setText("Eviter les debordements sous le menton");
+        trimNeck.setChecked(true);
+        column.addView(trimNeck);
 
         Runnable refresh = () -> {
             float dx = (x.getProgress() - 100) / 100f;
@@ -167,30 +198,36 @@ public final class HeadSwapCompositePreview {
             float sizeFactor = .5f + size.getProgress() * .005f;
             float degrees = angle.getProgress() - 90f;
             int featherPx = feather.getProgress();
+            int colorStrength = color.getProgress();
             HeadSwapCompositor.Settings settings = new HeadSwapCompositor.Settings(
-                    dx, dy, sizeFactor, degrees, featherPx);
-            preview.setSettings(settings);
+                    dx, dy, sizeFactor, degrees, featherPx, colorStrength);
+            preview.setSettings(settings, trimNeck.isChecked());
             values.setText(String.format(Locale.FRANCE,
-                    "X : %+d%% | Y : %+d%% | Taille : %d%% | Angle : %+.0f° | Fondu : %d px",
+                    "X : %+d%% | Y : %+d%% | Taille : %d%% | Angle : %+.0f° "
+                            + "| Fondu : %d px | Couleur : %d%%",
                     x.getProgress() - 100, y.getProgress() - 100,
-                    Math.round(sizeFactor * 100), degrees, featherPx));
+                    Math.round(sizeFactor * 100), degrees, featherPx,
+                    colorStrength));
         };
-        attach(x, refresh);
-        attach(y, refresh);
-        attach(size, refresh);
-        attach(angle, refresh);
-        attach(feather, refresh);
+        attach(x, refresh); attach(y, refresh); attach(size, refresh);
+        attach(angle, refresh); attach(feather, refresh); attach(color, refresh);
+        trimNeck.setOnCheckedChangeListener((buttonView, checked) -> refresh.run());
         refresh.run();
+
+        Button reapplyAngle = new Button(activity);
+        reapplyAngle.setAllCaps(false);
+        reapplyAngle.setText("Retablir l'orientation automatique (yeux)");
+        reapplyAngle.setOnClickListener(v -> angle.setProgress(90 + initialAngle));
+        column.addView(reapplyAngle);
 
         Button reset = new Button(activity);
         reset.setAllCaps(false);
-        reset.setText("Recentrer et reinitialiser");
+        reset.setText("Recentrer et retablir les valeurs recommandees");
         reset.setOnClickListener(v -> {
-            x.setProgress(100);
-            y.setProgress(100);
-            size.setProgress(100);
-            angle.setProgress(90);
-            feather.setProgress(8);
+            x.setProgress(100); y.setProgress(100); size.setProgress(100);
+            angle.setProgress(90 + initialAngle);
+            feather.setProgress(8); color.setProgress(60);
+            trimNeck.setChecked(true);
             refresh.run();
         });
         column.addView(reset);
@@ -198,16 +235,17 @@ public final class HeadSwapCompositePreview {
         TextView notes = new TextView(activity);
         notes.setPadding(0, dp(activity, 8), 0, 0);
         notes.setText(String.format(Locale.FRANCE,
-                "Surface detectee - source : %.1f%%, cible : %.1f%%.\n"
-                        + "L'aperçu et le PNG utilisent les memes transformations.\n"
-                        + "Aucune modification n'est appliquee au MP4.",
+                "Surface detectee : source %.1f%%, cible %.1f%%.\n"
+                        + "L'aperçu et le PNG utilisent les mêmes reglages. "
+                        + "Pour une pose 3D differente, le collage est desactive "
+                        + "et il faut choisir une photo source plus proche.",
                 alignment.sourceHeadPercent, alignment.targetHeadPercent));
         column.addView(notes);
 
         ScrollView scroll = new ScrollView(activity);
         scroll.addView(column);
         AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setTitle("Etape 31 - fusion tete (image)")
+                .setTitle("Etape 33 - pose 3D (image fixe)")
                 .setView(scroll)
                 .setNeutralButton("Enregistrer PNG", null)
                 .setPositiveButton("Fermer", null)
@@ -219,8 +257,10 @@ public final class HeadSwapCompositePreview {
         dialog.setOnShowListener(d -> {
             Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
             if (save != null) {
+                save.setEnabled(pose.compatible);
                 save.setOnClickListener(v -> savePreview(
-                        activity, executor, prepared, preview.settings));
+                        activity, executor, prepared, preview.settings,
+                        preview.trimNeck));
             }
         });
         dialog.show();
@@ -229,8 +269,9 @@ public final class HeadSwapCompositePreview {
     /** Capture les pixels sur le thread UI, puis ecrit le PNG hors de ce thread. */
     private static void savePreview(AppCompatActivity activity,
                                     ExecutorService executor,
-                                    HeadSwapCompositor.Prepared prepared,
-                                    HeadSwapCompositor.Settings settings) {
+                                    HeadSwapPoseCompositor.Prepared prepared,
+                                    HeadSwapCompositor.Settings settings,
+                                    boolean trimNeck) {
         if (!active(activity)) return;
         if (executor == null || executor.isShutdown()) {
             message(activity, "Export indisponible", "Le moteur de travail est arrete.");
@@ -238,7 +279,7 @@ public final class HeadSwapCompositePreview {
         }
         final Bitmap picture;
         try {
-            picture = HeadSwapCompositor.compose(prepared, settings);
+            picture = HeadSwapPoseCompositor.compose(prepared, settings, trimNeck);
         } catch (Exception error) {
             message(activity, "Image non creee", error.getMessage());
             return;
@@ -309,25 +350,26 @@ public final class HeadSwapCompositePreview {
         return "Image enregistree dans le dossier prive : " + file.getAbsolutePath();
     }
 
-    /** Apercu en fusion alpha 100%, non en superposition semi-transparente. */
+    /** Composition et export PNG utilisent exactement les memes transformations. */
     private static final class CompositeView extends View {
-        private final HeadSwapCompositor.Prepared prepared;
+        private final HeadSwapPoseCompositor.Prepared prepared;
         private HeadSwapCompositor.Settings settings = HeadSwapCompositor.Settings.defaults();
+        private boolean trimNeck = true;
 
-        CompositeView(AppCompatActivity activity, HeadSwapCompositor.Prepared prepared) {
+        CompositeView(AppCompatActivity activity,
+                      HeadSwapPoseCompositor.Prepared prepared) {
             super(activity);
             this.prepared = prepared;
-            // Evite un rendu mis en cache lorsque le masque change de fondu.
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void setSettings(HeadSwapCompositor.Settings next) {
+        void setSettings(HeadSwapCompositor.Settings next, boolean trim) {
             settings = next;
+            trimNeck = trim;
             invalidate();
         }
 
-        @Override
-        protected void onDraw(Canvas canvas) {
+        @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             if (prepared.alignment.targetFrame.isRecycled()
                     || prepared.alignment.sourceHead.isRecycled()) return;
@@ -343,7 +385,7 @@ public final class HeadSwapCompositePreview {
             try {
                 canvas.translate(left, top);
                 canvas.scale(scale, scale);
-                HeadSwapCompositor.draw(canvas, prepared, settings);
+                HeadSwapPoseCompositor.draw(canvas, prepared, settings, trimNeck);
             } finally {
                 canvas.restore();
             }
