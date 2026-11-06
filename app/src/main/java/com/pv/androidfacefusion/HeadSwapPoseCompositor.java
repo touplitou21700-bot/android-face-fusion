@@ -131,13 +131,27 @@ public final class HeadSwapPoseCompositor {
         return new Prepared(alignment, pose, pixels, distances(pixels, w, h));
     }
 
+    /**
+     * Mode normal: une pose incompatible laisse uniquement la cible.
+     * Conserve cette methode pour la compatibilite avec l'ancienne interface.
+     */
     public static Bitmap compose(Prepared prepared,
                                  HeadSwapCompositor.Settings settings,
                                  boolean trimNeck) {
+        return compose(prepared, settings, trimNeck, false);
+    }
+
+    /**
+     * force2D=true permet un DIAGNOSTIC de superposition en cas de pose 3D
+     * differente. Il ne reconstruit pas la vue manquante de la tete.
+     */
+    public static Bitmap compose(Prepared prepared,
+                                 HeadSwapCompositor.Settings settings,
+                                 boolean trimNeck, boolean force2D) {
         Bitmap bitmap = Bitmap.createBitmap(prepared.alignment.targetFrame.getWidth(),
                 prepared.alignment.targetFrame.getHeight(), Bitmap.Config.ARGB_8888);
         try {
-            draw(new Canvas(bitmap), prepared, settings, trimNeck);
+            draw(new Canvas(bitmap), prepared, settings, trimNeck, force2D);
             return bitmap;
         } catch (RuntimeException error) {
             bitmap.recycle();
@@ -148,6 +162,12 @@ public final class HeadSwapPoseCompositor {
     public static void draw(Canvas canvas, Prepared prepared,
                             HeadSwapCompositor.Settings settings,
                             boolean trimNeck) {
+        draw(canvas, prepared, settings, trimNeck, false);
+    }
+
+    public static void draw(Canvas canvas, Prepared prepared,
+                            HeadSwapCompositor.Settings settings,
+                            boolean trimNeck, boolean force2D) {
         if (canvas == null || prepared == null || settings == null) {
             throw new IllegalArgumentException("Rendu incomplet.");
         }
@@ -155,8 +175,9 @@ public final class HeadSwapPoseCompositor {
                 | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
         HeadSwapAlignmentEngine.Result a = prepared.alignment;
         canvas.drawBitmap(a.targetFrame, 0f, 0f, paint);
-        // Ne PAS afficher un faux head-swap avec des poses incompatibles.
-        if (!prepared.pose.compatible) return;
+        // Avant: une pose 3D differente donnait silencieusement l'image cible.
+        // Le mode 2D force est explicite et ne concerne qu'une image de test.
+        if (!prepared.pose.compatible && !force2D) return;
         HeadSwapPose3D.Match pose = prepared.pose;
         float cx = pose.targetEyeX + settings.offsetX * a.targetHeadBounds.width() * .6f;
         float cy = pose.targetEyeY + settings.offsetY * a.targetHeadBounds.height() * .6f;
