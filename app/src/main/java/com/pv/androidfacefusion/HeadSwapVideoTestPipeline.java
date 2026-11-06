@@ -18,7 +18,7 @@ import java.util.UUID;
  * HeadSwapAlignmentEngine / HeadSwapPose3D / HeadSwapPoseCompositor.
  *
  * Limites importantes :
- * - 2,3 s au maximum, 150 images, 480 px sur le plus grand cote.
+ * - 5 secondes au maximum, 300 images, 480 px sur le plus grand cote.
  * - source fixe, segmentation et pose recalculées pour chaque frame : lent.
  * - transformation 2D guidee par des reperes 3D, PAS reconstruction 3D.
  * - si une frame ne peut pas etre traitee, elle reste identique a l'originale.
@@ -27,8 +27,8 @@ import java.util.UUID;
  */
 public final class HeadSwapVideoTestPipeline {
     private static final String TAG = "HeadSwapVideoTest";
-    public static final long MAX_DURATION_MS = 2_300L;
-    public static final int MAX_FRAMES = 150;
+    public static final long MAX_DURATION_MS = 5_000L;
+    public static final int MAX_FRAMES = 300;
     public static final int MAX_SIDE = 480;
 
     private HeadSwapVideoTestPipeline() { }
@@ -115,7 +115,7 @@ public final class HeadSwapVideoTestPipeline {
         }
         long duration = readDurationMs(context, originalVideo);
         if (duration <= 0 || duration > MAX_DURATION_MS) {
-            throw new IOException("Choisir une video MP4 de 1 a 2 secondes (max 2,3 s). "
+            throw new IOException("Choisir une video MP4 de 5 secondes maximum. "
                     + "Duree detectee : " + duration + " ms. "
                     + "Ce mode ne decoupe pas les videos longues.");
         }
