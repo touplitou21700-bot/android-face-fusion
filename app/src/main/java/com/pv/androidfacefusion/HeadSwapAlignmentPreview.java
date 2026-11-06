@@ -26,8 +26,11 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Etape 29 : apercu interactif de l'alignement sur UNE image cible.
- * Aucune sortie MP4 ni modification du moteur video existant.
+ * Etape 30 : apercu interactif de l'alignement 2D sur UNE image cible.
+ * Ajoute une rotation manuelle autour du centre de la tete source,
+ * sans modifier le pipeline video ou l'export MP4.
+ * IMPORTANT : cette rotation dans le plan de l'image ne corrige pas
+ * l'orientation 3D (profil, tete tournee vers le haut/bas).
  */
 public final class HeadSwapAlignmentPreview {
 
@@ -198,7 +201,8 @@ public final class HeadSwapAlignmentPreview {
         TextView info = new TextView(activity);
         info.setText("Apercu sur la premiere image de la video.\n"
                 + "Contour cyan : tete cible detectee.\n"
-                + "Tete source semi-transparente : position automatique approximative.");
+                + "Tete source semi-transparente : rotation et position ajustables.\n"
+                + "L'inclinaison corrige la tete penchee, pas un profil 3D.");
         column.addView(info);
 
         AlignmentView view = new AlignmentView(activity, result);
@@ -208,26 +212,32 @@ public final class HeadSwapAlignmentPreview {
         column.addView(view, imageParams);
 
         TextView positionInfo = new TextView(activity);
-        positionInfo.setText("Decalage X : 0% | Y : 0% | Taille : 100%");
+        positionInfo.setText("X : 0% | Y : 0% | Taille : 100% | Angle : +0°");
         positionInfo.setPadding(0, dp(activity, 9), 0, dp(activity, 4));
         column.addView(positionInfo);
 
         SeekBar x = slider(activity, column, "Deplacement horizontal", 100);
         SeekBar y = slider(activity, column, "Deplacement vertical", 100);
         SeekBar size = slider(activity, column, "Taille de la tete", 100);
+        // Rotation 2D en degres. Valeur 90 = 0 degre; plage -90 a +90.
+        SeekBar angle = slider(activity, column,
+                "Inclinaison de la tete (-90° a +90°)", 90);
+        angle.setMax(180);
         Runnable refresh = () -> {
             float offsetX = (x.getProgress() - 100) / 100f;
             float offsetY = (y.getProgress() - 100) / 100f;
             float sizeFactor = .5f + size.getProgress() * .005f;
-            view.setAdjustments(offsetX, offsetY, sizeFactor);
+            float rotationDegrees = angle.getProgress() - 90f;
+            view.setAdjustments(offsetX, offsetY, sizeFactor, rotationDegrees);
             positionInfo.setText(String.format(Locale.FRANCE,
-                    "Decalage X : %+d%% | Y : %+d%% | Taille : %d%%",
+                    "X : %+d%% | Y : %+d%% | Taille : %d%% | Angle : %+.0f°",
                     x.getProgress() - 100, y.getProgress() - 100,
-                    Math.round(sizeFactor * 100)));
+                    Math.round(sizeFactor * 100), rotationDegrees));
         };
         attach(x, refresh);
         attach(y, refresh);
         attach(size, refresh);
+        attach(angle, refresh);
 
         Button reset = new Button(activity);
         reset.setAllCaps(false);
@@ -236,6 +246,7 @@ public final class HeadSwapAlignmentPreview {
             x.setProgress(100);
             y.setProgress(100);
             size.setProgress(100);
+            angle.setProgress(90);
             refresh.run();
         });
         column.addView(reset);
@@ -243,8 +254,10 @@ public final class HeadSwapAlignmentPreview {
         TextView footnote = new TextView(activity);
         footnote.setText(String.format(Locale.FRANCE,
                 "Detection source : %.1f%% des pixels | cible : %.1f%%.\n"
-                        + "Alignement 2D seulement : ne corrige ni la rotation "
-                        + "de la tete, ni les oreilles, ni l'eclairage. "
+                        + "La rotation corrige uniquement l'inclinaison 2D "
+                        + "(tete penchee a gauche ou a droite). Elle ne corrige "
+                        + "pas la pose 3D (profil, menton leve/baisse), "
+                        + "les oreilles ou l'eclairage. "
                         + "Les reglages ne sont pas enregistres dans le MP4.",
                 result.sourceHeadPercent, result.targetHeadPercent));
         footnote.setPadding(0, dp(activity, 8), 0, 0);
@@ -291,6 +304,7 @@ public final class HeadSwapAlignmentPreview {
         private float dx;
         private float dy;
         private float sizeFactor = 1f;
+        private float rotationDegrees = 0f;
 
         AlignmentView(AppCompatActivity activity, HeadSwapAlignmentEngine.Result result) {
             super(activity);
@@ -298,10 +312,12 @@ public final class HeadSwapAlignmentPreview {
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void setAdjustments(float dx, float dy, float sizeFactor) {
+        void setAdjustments(float dx, float dy, float sizeFactor,
+                            float rotationDegrees) {
             this.dx = dx;
             this.dy = dy;
             this.sizeFactor = sizeFactor;
+            this.rotationDegrees = rotationDegrees;
             invalidate();
         }
 
@@ -342,7 +358,13 @@ public final class HeadSwapAlignmentPreview {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(Color.WHITE);
             paint.setAlpha(205);
+            // Rotation de la tete AUTOUR de son centre place sur la cible.
+            // Le repere a deja ete transforme par translate et scale, donc
+            // les coordonnees centerX/centerY sont bien en pixels de la cible.
+            canvas.save();
+            canvas.rotate(rotationDegrees, centerX, centerY);
             canvas.drawBitmap(result.sourceHead, null, placed, paint);
+            canvas.restore();
             paint.setAlpha(255);
             canvas.restore();
         }
